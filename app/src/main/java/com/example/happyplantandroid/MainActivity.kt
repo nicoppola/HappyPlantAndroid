@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
@@ -24,8 +22,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import com.example.happyplantandroid.data.InfluxDbService
+import com.example.happyplantandroid.data.PlantRepository
+import com.example.happyplantandroid.ui.PlantData
+import com.example.happyplantandroid.ui.PlantUiState
+import com.example.happyplantandroid.ui.TopBar
 import com.example.happyplantandroid.ui.theme.HappyPlantAndroidTheme
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,90 +46,64 @@ class MainActivity : ComponentActivity() {
 }
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlantApp(viewModel: MainViewModel) {
+
+    val uiState by viewModel.uiState.collectAsState()
+
     Scaffold(
         topBar = { TopBar() },
-        content = { padding ->
-            PaddingValues(horizontal = 4.dp)
-            when (val state = viewModel.uiState.collectAsState().value) {
-                is PlantUiState.Empty -> PlantDataContent(
-                    plantList = emptyList(),
-                    onRefresh = state.onRefresh,
-                    isRefreshing = viewModel.isRefreshing
-                )
-                is PlantUiState.Error -> ErrorDialog(message = state.message)
-                is PlantUiState.Loaded -> {
-                    PlantDataContent(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding),
-                        state.data,
-                        state.onRefresh,
-                        viewModel.isRefreshing
-                    )
-                }
-                PlantUiState.Loading -> LoadingContent()
+        content = {
+            Box(
+                modifier = Modifier.padding(it)
+            ) {
+                HomePageContent(uiState)
             }
-        }
+//            if (uiState.isLoading) {
+//                LoadingContent()
+//            } else {
+//                HomePageContent(uiState)
+//
+//            }
+        },
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun TopBar() {
-    TopAppBar(
-        modifier = Modifier,
-        title = { Text("Happy Plant") },
-        navigationIcon = {
-            IconButton(onClick = {}) {
-                Icon(Icons.Filled.Menu, "menuIcon")
-            }
-        },
-        actions = {
-            IconButton(onClick = {}) {
-                Icon(Icons.Filled.Settings, "settingsIcon")
-            }
-        },
-    )
-}
 
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
-fun PlantDataContent(
-    modifier: Modifier = Modifier,
-    plantList: List<PlantUiModel>,
-    onRefresh: () -> Unit,
-    isRefreshing: StateFlow<Boolean>
+fun HomePageContent(
+    uiState: PlantUiState
 ) {
-
-    val isLoading by isRefreshing.collectAsState()
-
     val pullRefreshState =
-        rememberPullRefreshState(refreshing = isLoading,
-            onRefresh = { onRefresh() })
+        rememberPullRefreshState(refreshing = uiState.isLoading,
+            onRefresh = { uiState.refreshPlantData() })
 
+    Box(
+        Modifier
+            .pullRefresh(pullRefreshState)
+            .padding(top = 4.dp)) {
+        PullRefreshIndicator(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .zIndex(1F),
+            refreshing = uiState.isLoading,
+            state = pullRefreshState,
+        )
 
-    Box(modifier.pullRefresh(pullRefreshState)) {
         LazyColumn(
             state = rememberLazyListState()
         )
         {
-            items(items = plantList) { condition ->
+            items(items = uiState.plantData) { condition ->
                 ConditionCard(condition = condition)
             }
         }
-        PullRefreshIndicator(
-            refreshing = isLoading,
-            state = pullRefreshState,
-            Modifier.align(Alignment.TopCenter)
-        )
     }
 }
 
 @Composable
-fun ConditionCard(condition: PlantUiModel) {
+fun ConditionCard(condition: PlantData) {
     Card(
         modifier = Modifier.padding(vertical = 4.dp, horizontal = 8.dp)
     ) {
@@ -136,24 +113,23 @@ fun ConditionCard(condition: PlantUiModel) {
                 .fillMaxWidth()
         ) {
             //Label
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 12.dp)
-            ) {
-                Text(text = condition.location)
-            }
+            Text(text = condition.location, style = MaterialTheme.typography.headlineSmall)
+
+            Spacer(modifier = Modifier.weight(1F))
+
             //Temp & Humidity
             Column(
                 modifier = Modifier
                     .padding(horizontal = 12.dp)
             ) {
-                Row {
-                    Text(text = condition.temperature)
-                }
-                Row {
-                    Text(text = condition.humidity)
-                }
+                Text(
+                    text = condition.temperature,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = condition.humidity,
+                    style = MaterialTheme.typography.bodyLarge
+                )
             }
         }
     }
@@ -171,45 +147,22 @@ fun LoadingContent() {
     }
 }
 
-@Composable
-fun ErrorDialog(message: String) {
-    val openDialog = remember { mutableStateOf(true) }
-    if (openDialog.value) {
-        AlertDialog(onDismissRequest = { openDialog.value = false },
-            title = { Text(text = stringResource(R.string.error_dialog_title)) },
-            text = { Text(message) },
-            confirmButton = { openDialog.value = false })
-    }
-}
-
 @Preview
 @Composable
 fun PlantContentPreview() {
     HappyPlantAndroidTheme {
-        PlantDataContent(
-            plantList = listOf(
-                PlantUiModel("Bedroom", "45%", "75°"),
-                PlantUiModel("Office", "30%", "66°"),
-                PlantUiModel("Kitchen", "36%", "68°")
-            ),
-            onRefresh = {},
-            isRefreshing = MutableStateFlow<Boolean>(false).asStateFlow()
-        )
-    }
-}
-
-@Preview
-@Composable
-fun ErrorDialogPreview() {
-    HappyPlantAndroidTheme {
-        ErrorDialog(message = "This is a test error")
-    }
-}
-
-@Preview
-@Composable
-fun TopBarPreview() {
-    HappyPlantAndroidTheme {
-        TopBar()
+        Surface {
+            HomePageContent(
+                PlantUiState(
+                    plantData = listOf(
+                        PlantData("Bedroom", "45%", "75°"),
+                        PlantData("Office", "30%", "66°"),
+                        PlantData("Kitchen", "36%", "68°")
+                    ),
+                    refreshPlantData = {},
+                    isLoading = false
+                )
+            )
+        }
     }
 }
